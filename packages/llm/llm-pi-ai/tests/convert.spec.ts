@@ -956,6 +956,32 @@ describe('mapStopReason / mapUsage', () => {
       .toMatchObject({ kind: 'error', failure: { code: 'TRANSPORT' } })
   })
 
+  it.each([
+    ['stream error: stream disconnected before completion: stream closed before response.completed', 'TRANSPORT'],
+    ['Our servers are currently overloaded. Please try again later.', 'SERVER'],
+    ['Codex error: Our servers are currently overloaded. Please try again later.', 'SERVER'],
+    ['request rejected because overload recovery is unsupported', 'PI_AI_ERROR'],
+    ['server overload configuration is invalid', 'PI_AI_ERROR'],
+  ])('classifies %j without rewriting the failure message', (errorMessage, code) => {
+    expect(mapStopReason(assistant({ stopReason: 'error', errorMessage })))
+      .toEqual({ kind: 'error', failure: { message: errorMessage, code } })
+  })
+
+  it.each([
+    ['HTTP 401: bad key', 'AUTH'],
+    ['HTTP 403: forbidden', 'AUTH'],
+    ['insufficient_quota', 'QUOTA'],
+    ['HTTP 429: rate limit', 'RATE_LIMIT'],
+    ['HTTP 413: Payload Too Large', 'INVALID_REQUEST'],
+    ['request body too large', 'INVALID_REQUEST'],
+    ['HTTP 400: bad input', 'INVALID_REQUEST'],
+    ['invalid request', 'INVALID_REQUEST'],
+  ])('preserves %s precedence over server overload', (prefix, code) => {
+    const errorMessage = `${prefix}: Our servers are currently overloaded. Please try again later.`
+    expect(mapStopReason(assistant({ stopReason: 'error', errorMessage })))
+      .toEqual({ kind: 'error', failure: { message: errorMessage, code } })
+  })
+
   it('uses pi-ai provider-specific overflow classification without losing rate-limit exclusions', () => {
     expect(mapStopReason(assistant({
       stopReason: 'error',

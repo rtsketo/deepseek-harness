@@ -284,6 +284,76 @@ describe('provider-routed retry policy', () => {
     })
   })
 
+  it('retries transient error finishes without replaying a completed tool', async () => {
+    vi.useFakeTimers()
+    const callId = ToolCallId('completed-call')
+    const failures = [
+      { message: 'stream error: stream disconnected before completion: stream closed before response.completed', code: 'TRANSPORT' },
+      { message: 'Our servers are currently overloaded. Please try again later.', code: 'SERVER' },
+    ]
+    const adapter = new ScriptedAdapter([
+      [
+        { type: 'block-start', index: 0, blockType: 'tool-call' },
+        { type: 'tool-call-delta', index: 0, id: callId, name: 'record_effect', argumentsDelta: '{}' },
+        { type: 'block-end', index: 0, block: { type: 'tool-call', id: callId, name: 'record_effect', arguments: '{}' } },
+        { type: 'finish', reason: { kind: 'tool-calls' } },
+      ],
+      ...failures.map((failure): StreamChunk[] => [{ type: 'finish', reason: { kind: 'error', failure } }]),
+      textResponse('recovered'),
+    ])
+    ;({ ctx: context } = await harness(adapter))
+    let toolExecutions = 0
+    context.tools.register(defineContentToolFixture({
+      name: 'record_effect',
+      description: 'record one completed effect',
+      parameters: {},
+      async execute() {
+        toolExecutions += 1
+        return [{ type: 'text', text: 'effect recorded' }]
+      },
+    }))
+    const agent = await context.agentLoop.create(SessionId('retry-completed-tool'), { provider: 'mock', model: 'mock' })
+    const first = waitForRetry(context, agent, 1)
+    agent.followup(createUserMessage({ content: [{ type: 'text', text: 'go' }], source: { kind: 'user' } }))
+    expect((await first).data.failure).toEqual(failures[0])
+
+    const second = waitForRetry(context, agent, 2)
+    await vi.advanceTimersByTimeAsync(500)
+    expect((await second).data.failure).toEqual(failures[1])
+    const idle = waitForIdle(context, agent)
+    await vi.advanceTimersByTimeAsync(1000)
+    await idle
+
+    expect(adapter.requests).toHaveLength(4)
+    expect(adapter.requests[2]?.messages).toEqual(adapter.requests[1]?.messages)
+    expect(adapter.requests[3]?.messages).toEqual(adapter.requests[1]?.messages)
+    expect(toolExecutions).toBe(1)
+    const events = agent.session.snapshotEvents()
+    expect(events.filter(event => event.type === 'tool/call')).toHaveLength(1)
+    expect(events.filter(event => event.type === 'tool/result')).toHaveLength(1)
+    expect(events.filter(event => event.type === 'llm/retry')).toHaveLength(2)
+    expect(events.at(-1)).toMatchObject({ type: 'turn/end', data: { reason: { kind: 'completed' } } })
+    expect(agent.session.deriveMessages().at(-1)?.content).toEqual([{ type: 'text', text: 'recovered' }])
+  })
+
+  it('does not retry an unmatched permanent PI_AI_ERROR finish', async () => {
+    const failure = { message: 'unsupported provider operation', code: 'PI_AI_ERROR' }
+    const adapter = new ScriptedAdapter([
+      [{ type: 'finish', reason: { kind: 'error', failure } }],
+      textResponse('must not be requested'),
+    ])
+    ;({ ctx: context } = await harness(adapter))
+    const agent = await context.agentLoop.create(SessionId('retry-permanent-finish'), { provider: 'mock', model: 'mock' })
+    agent.followup(createUserMessage({ content: [{ type: 'text', text: 'go' }], source: { kind: 'user' } }))
+    await waitForIdle(context, agent)
+
+    expect(adapter.requests).toHaveLength(1)
+    expect(agent.session.snapshotEvents().some(event => event.type === 'llm/retry')).toBe(false)
+    expect(agent.session.snapshotEvents().at(-1)).toMatchObject({
+      type: 'turn/end', data: { reason: { kind: 'error', error: failure } },
+    })
+  })
+
   it('leaves partial failed chunks on their step without committing a message or tool side effect', async () => {
     vi.useFakeTimers()
     const adapter = new ScriptedAdapter([

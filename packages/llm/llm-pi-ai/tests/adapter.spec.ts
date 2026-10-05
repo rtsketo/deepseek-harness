@@ -334,6 +334,41 @@ describe('PiAiAdapter provider routing', () => {
     expect(server.paths).toEqual(['/v1/responses'])
   })
 
+  it.each([
+    {
+      message: 'stream error: stream disconnected before completion: stream closed before response.completed',
+      status: 408, code: 'request_timeout', type: 'server_error', expected: 'TRANSPORT',
+    },
+    {
+      message: 'Our servers are currently overloaded. Please try again later.',
+      status: 502, code: 'server_is_overloaded', type: 'service_unavailable_error', expected: 'SERVER',
+    },
+    {
+      message: 'Codex error: Our servers are currently overloaded. Please try again later.',
+      status: 502, code: 'server_is_overloaded', type: 'service_unavailable_error', expected: 'SERVER',
+    },
+    {
+      message: 'unsupported provider operation',
+      status: 400, code: 'unsupported_operation', type: 'invalid_request_error', expected: 'PI_AI_ERROR',
+    },
+  ])('classifies an HTTP 200 Responses error frame as $expected: $message', async ({ message, status, code, type, expected }) => {
+    const server = await mockServer([{
+      status: 200,
+      events: [JSON.stringify({ type: 'error', error: { message, status, code, type } })],
+    }])
+    const ctx = new Context()
+    onTestFinished(() => ctx.fiber.dispose())
+    await ctx.plugin(LlmRuntime)
+    await ctx.plugin(LlmPiAi, {
+      providers: { openai: { apiKeyEnv: 'PI_TEST_KEY', baseURL: `${server.url}/v1` } },
+    })
+
+    const result = await assemble(ctx, { provider: 'openai', model: 'gpt-4.1', messages: [] })
+
+    expect(result.finish).toEqual({ kind: 'error', failure: { message, code: expected } })
+    expect(server.paths).toEqual(['/v1/responses'])
+  })
+
   it('forces one wire request for an SDK-retryable provider failure', async () => {
     const server = await mockServer([
       {
