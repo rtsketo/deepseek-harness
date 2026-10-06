@@ -348,13 +348,60 @@ describe('PiAiAdapter provider routing', () => {
       status: 502, code: 'server_is_overloaded', type: 'service_unavailable_error', expected: 'SERVER',
     },
     {
+      message: 'overloaded',
+      status: 503, code: 'server_is_overloaded', type: 'service_unavailable_error', expected: 'SERVER',
+    },
+    {
+      message: 'WebSocket stream closed before response.completed',
+      status: 502, code: 'stream_closed', type: 'server_error', expected: 'TRANSPORT',
+    },
+    {
+      message: 'WebSocket closed 1012',
+      status: 502, code: 'stream_closed', type: 'server_error', expected: 'TRANSPORT',
+    },
+    {
+      message: 'Upstream response stream was interrupted',
+      flat: true, code: 'upstream_stream_read_error', expected: 'TRANSPORT',
+    },
+    {
+      message: 'Upstream HTTP/2 stream failed',
+      flat: true, code: 'upstream_http2_stream_error', expected: 'TRANSPORT',
+    },
+    {
+      message: 'Relay failure',
+      flat: true, code: 'upstream_stream_truncated', expected: 'TRANSPORT',
+    },
+    {
+      message: 'unsupported provider operation',
+      flat: true, code: 'upstream_stream_unknown_error', expected: 'PI_AI_ERROR',
+    },
+    {
+      message: 'unsupported provider operation',
+      flat: true, code: 'upstream_stream_read_error_detail', expected: 'PI_AI_ERROR',
+    },
+    {
+      message: 'unsupported WebSocket option',
+      status: 400, code: 'unsupported_operation', type: 'invalid_request_error', expected: 'PI_AI_ERROR',
+    },
+    {
+      message: '401 Unauthorized',
+      flat: true, code: 'upstream_stream_read_error', expected: 'AUTH',
+    },
+    {
+      message: 'invalid_request_error: bad payload',
+      flat: true, code: 'upstream_http2_stream_error', expected: 'INVALID_REQUEST',
+    },
+    {
       message: 'unsupported provider operation',
       status: 400, code: 'unsupported_operation', type: 'invalid_request_error', expected: 'PI_AI_ERROR',
     },
-  ])('classifies an HTTP 200 Responses error frame as $expected: $message', async ({ message, status, code, type, expected }) => {
+  ])('classifies an HTTP 200 Responses error frame as $expected: $message', async ({ message, status, code, type, flat, expected }) => {
+    const frame = flat
+      ? { type: 'error', code, message, param: null, sequence_number: 1 }
+      : { type: 'error', error: { message, status, code, type } }
     const server = await mockServer([{
       status: 200,
-      events: [JSON.stringify({ type: 'error', error: { message, status, code, type } })],
+      events: [JSON.stringify(frame)],
     }])
     const ctx = new Context()
     onTestFinished(() => ctx.fiber.dispose())
@@ -365,7 +412,8 @@ describe('PiAiAdapter provider routing', () => {
 
     const result = await assemble(ctx, { provider: 'openai', model: 'gpt-4.1', messages: [] })
 
-    expect(result.finish).toEqual({ kind: 'error', failure: { message, code: expected } })
+    const failureMessage = flat ? `Error Code ${code}: ${message}` : message
+    expect(result.finish).toEqual({ kind: 'error', failure: { message: failureMessage, code: expected } })
     expect(server.paths).toEqual(['/v1/responses'])
   })
 

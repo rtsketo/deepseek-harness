@@ -47,7 +47,7 @@ function classifyPiAiError(message: string): string {
   // same request cannot succeed, so it is invalid, not transient.
   if (/\b413\b|failed to buffer the request body:\s*length limit exceeded|payload too large|request body too large/i.test(message)) return 'INVALID_REQUEST'
   if (/\b400\b|invalid.?request/i.test(message)) return 'INVALID_REQUEST'
-  if (/\b5\d\d\b|\bour servers are currently overloaded\b/i.test(message)) return 'SERVER'
+  if (/\b5\d\d\b|\boverloaded\b/i.test(message)) return 'SERVER'
   if (/\btime(?:d)?\s*out\b|timeout/i.test(message)) return 'TIMEOUT'
   // A stream truncated before the provider's terminal event: each pi-ai provider
   // throws its own wording when the wire closes mid-response without a terminal
@@ -55,9 +55,11 @@ function classifyPiAiError(message: string): string {
   // event`, `… ended without a terminal event`, `Stream ended without
   // finish_reason`). The connection dropped mid-response, so this is a transport
   // truncation, not a model-level error.
-  if (/stream (?:ended (?:before|without)|disconnected before completion)\b/i.test(message)) return 'TRANSPORT'
+  if (/stream (?:ended (?:before|without)|disconnected before completion)\b/i.test(message)
+    || /\bupstream_(?:stream_(?:read_error|truncated)|http2_stream_error)\b/i.test(message)) return 'TRANSPORT'
   if (/\b(?:network|connection|socket|fetch)\b|\bECONN[A-Z]+\b/i.test(message)
-    || /\b(?:other side closed|HTTP2 request did not get a response|WebSocket closed unexpectedly)\b/i.test(message)
+    || /\b(?:other side closed|HTTP2 request did not get a response)\b/i.test(message)
+    || /\bWebSocket (?:stream closed before response\.completed|closed (?:unexpectedly|1012))\b/i.test(message)
     // undici renders a mid-stream socket drop as a bare `terminated` (its
     // `cause` — the real SocketError — was flattened away upstream); Node's
     // stream layer says `Premature close`.
@@ -74,10 +76,11 @@ function classifyPiAiError(message: string): string {
  * @returns the mapped harness reason. Recognized error text, `stop` usage above
  *   `contextWindow`, and zero-output `length` usage that fills the window map
  *   to `CONTEXT_WINDOW_EXCEEDED`; a `stop` with no content blocks maps to an
- *   `EMPTY_RESPONSE` error. Explicit incomplete-stream disconnects map to
- *   `TRANSPORT` and server overload to `SERVER`, preserving the failure text;
- *   unknown errors and terminal `pending` or `deferred` states map to
- *   `PI_AI_ERROR`, excluded from the default normal retry policy.
+ *   `EMPTY_RESPONSE` error. Known relay stream codes and transient WebSocket or
+ *   incomplete-stream closures map to `TRANSPORT`; server overload maps to
+ *   `SERVER`, preserving the failure text. Unknown errors and terminal
+ *   `pending` or `deferred` states map to `PI_AI_ERROR`, excluded from the
+ *   default normal retry policy.
  */
 export function mapStopReason(message: AssistantMessage, contextWindow?: number): FinishReason {
   const piAiOverflow = isContextOverflow(message, contextWindow)

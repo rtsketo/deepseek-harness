@@ -116,7 +116,7 @@ profile 的 `models` 列表会替换而非扩展路由的已安装目录；每�
 
 pi-ai 不提供的路由需要 `api`、`baseURL` 与非空 `models` 列表；无法服务的 profile 会在写入处被拒绝，并点名路由与模型。失败携带稳定 code：无法使用的凭据以 `INVALID_CREDENTIAL` 失败并点名路由与引用，`apiKeyEnv` 引用解析为空的路由以 `MISSING_CREDENTIAL` 失败，未配置模型以 `UNKNOWN_MODEL` 失败，终止性提供方失败则区分 `QUOTA` 与暂时性 `RATE_LIMIT`。`GenerateOptions.stop` 以 `UNSUPPORTED_OPTION` 被拒绝，因为 pi-ai 的通用流式 UI 无法跨提供方保证它。
 
-错误消息分类保留原始失败文本。`stream disconnected before completion` 映射为 `TRANSPORT`；`Our servers are currently overloaded`（包括带 Codex 前缀的消息）映射为 `SERVER`。这些失败使用路由现有的重试策略。未识别的消息仍为 `PI_AI_ERROR`，不在默认常规重试策略的范围内。
+错误消息分类保留原始失败文本。`stream disconnected before completion`、精确的中继错误码 `upstream_stream_read_error`、`upstream_http2_stream_error` 和 `upstream_stream_truncated`，以及 WebSocket 关闭措辞（`WebSocket stream closed before response.completed` 或 `WebSocket closed 1012`）映射为 `TRANSPORT`。单词 `overloaded`（包括完整的服务器过载短语和带 Codex 前缀的消息）映射为 `SERVER`。认证、配额、限流和非法请求检查优先。这些失败使用路由现有的重试策略；未识别的消息仍为 `PI_AI_ERROR`，不在默认常规重试策略的范围内。这是文本兜底：pi-ai 不会向此分类器转发结构化的提供方错误码。
 
 Config 更新严格验证发生变化的 provider。初始加载将已存储的目录故障保留为可编辑的 provider 诊断；未更改的故障 provider 不阻止其他编辑。可用模型仍可选择，无法解析的模型在网络 I/O 前失败。修复或删除问题配置会清除其诊断。
 

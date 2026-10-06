@@ -960,8 +960,29 @@ describe('mapStopReason / mapUsage', () => {
     ['stream error: stream disconnected before completion: stream closed before response.completed', 'TRANSPORT'],
     ['Our servers are currently overloaded. Please try again later.', 'SERVER'],
     ['Codex error: Our servers are currently overloaded. Please try again later.', 'SERVER'],
+    ['overloaded', 'SERVER'],
+    ['OVERLOADED', 'SERVER'],
+    ['Error Code upstream_stream_read_error: Upstream response stream was interrupted', 'TRANSPORT'],
+    ['Error Code upstream_http2_stream_error: Upstream HTTP/2 stream failed', 'TRANSPORT'],
+    ['Error Code upstream_stream_truncated: Upstream response stream ended before completion', 'TRANSPORT'],
+    ['upstream_stream_read_error', 'TRANSPORT'],
+    ['upstream_http2_stream_error', 'TRANSPORT'],
+    ['upstream_stream_truncated', 'TRANSPORT'],
+    ['WebSocket stream closed before response.completed', 'TRANSPORT'],
+    ['WebSocket closed 1012', 'TRANSPORT'],
+    ['websocket stream closed before response.completed', 'TRANSPORT'],
     ['request rejected because overload recovery is unsupported', 'PI_AI_ERROR'],
     ['server overload configuration is invalid', 'PI_AI_ERROR'],
+    ['overloadedness is unsupported', 'PI_AI_ERROR'],
+    ['unsupported WebSocket option', 'PI_AI_ERROR'],
+    ['WebSocket configuration is invalid', 'PI_AI_ERROR'],
+    ['Invalid Codex WebSocket JSON: bad payload', 'PI_AI_ERROR'],
+    ['WebSocket closed 1008: policy violation', 'PI_AI_ERROR'],
+    ['WebSocket closed 1009: message too big', 'PI_AI_ERROR'],
+    ['upstream_stream_unknown_error', 'PI_AI_ERROR'],
+    ['upstream_stream_read_error_detail', 'PI_AI_ERROR'],
+    ['my_upstream_http2_stream_error', 'PI_AI_ERROR'],
+    ['invalid_request_error: bad payload', 'INVALID_REQUEST'],
   ])('classifies %j without rewriting the failure message', (errorMessage, code) => {
     expect(mapStopReason(assistant({ stopReason: 'error', errorMessage })))
       .toEqual({ kind: 'error', failure: { message: errorMessage, code } })
@@ -976,10 +997,20 @@ describe('mapStopReason / mapUsage', () => {
     ['request body too large', 'INVALID_REQUEST'],
     ['HTTP 400: bad input', 'INVALID_REQUEST'],
     ['invalid request', 'INVALID_REQUEST'],
-  ])('preserves %s precedence over server overload', (prefix, code) => {
-    const errorMessage = `${prefix}: Our servers are currently overloaded. Please try again later.`
-    expect(mapStopReason(assistant({ stopReason: 'error', errorMessage })))
-      .toEqual({ kind: 'error', failure: { message: errorMessage, code } })
+  ])('preserves %s precedence over transient wording', (prefix, code) => {
+    for (const text of [
+      'Our servers are currently overloaded. Please try again later.',
+      'overloaded',
+      'upstream_stream_read_error',
+      'upstream_http2_stream_error',
+      'upstream_stream_truncated',
+      'WebSocket stream closed before response.completed',
+      'WebSocket closed 1012',
+    ]) {
+      const errorMessage = `${prefix}: ${text}`
+      expect(mapStopReason(assistant({ stopReason: 'error', errorMessage })))
+        .toEqual({ kind: 'error', failure: { message: errorMessage, code } })
+    }
   })
 
   it('uses pi-ai provider-specific overflow classification without losing rate-limit exclusions', () => {
